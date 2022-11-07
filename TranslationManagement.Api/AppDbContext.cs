@@ -1,6 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using TranslationManagement.Api.Controlers;
-using TranslationManagement.Api.Controllers;
+using TranslationManagement.Api.Enums;
+using TranslationManagement.Api.Models;
 
 namespace TranslationManagement.Api
 {
@@ -10,7 +10,20 @@ namespace TranslationManagement.Api
         {
         }
 
-        public DbSet<TranslationJobController.TranslationJob> TranslationJobs { get; set; }
-        public DbSet<TranslatorManagementController.TranslatorModel> Translators { get; set; }
+        public DbSet<TranslationJob> TranslationJobs { get; set; }
+        public DbSet<Translator> Translators { get; set; }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<Translator>()
+             .Property(t => t.Status)
+             .HasDefaultValue(TranslatorStatus.Applicant)
+             .HasConversion<string>();
+
+            modelBuilder.Entity<TranslationJob>()
+             .Property(j => j.Status)
+             .HasDefaultValue(TranslationJobStatus.New)
+             .HasConversion<string>();
+        }
     }
 }

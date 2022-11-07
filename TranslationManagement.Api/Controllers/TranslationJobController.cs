@@ -9,6 +9,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using TranslationManagement.Api.Controlers;
+using TranslationManagement.Api.Enums;
+using TranslationManagement.Api.Extensions;
+using TranslationManagement.Api.Models;
 
 namespace TranslationManagement.Api.Controllers
 {
@@ -16,23 +19,6 @@ namespace TranslationManagement.Api.Controllers
     [Route("api/jobs/[action]")]
     public class TranslationJobController : ControllerBase
     {
-        public class TranslationJob
-        {
-            public int Id { get; set; }
-            public string CustomerName { get; set; }
-            public string Status { get; set; }
-            public string OriginalContent { get; set; }
-            public string TranslatedContent { get; set; }
-            public double Price { get; set; }
-        }
-
-        static class JobStatuses
-        {
-            internal static readonly string New = "New";
-            internal static readonly string Inprogress = "InProgress";
-            internal static readonly string Completed = "Completed";
-        }
-
         private AppDbContext _context;
         private readonly ILogger<TranslatorManagementController> _logger;
 
@@ -57,7 +43,7 @@ namespace TranslationManagement.Api.Controllers
         [HttpPost]
         public bool CreateJob(TranslationJob job)
         {
-            job.Status = "New";
+            job.Status = TranslationJobStatus.New;
             SetPrice(job);
             _context.TranslationJobs.Add(job);
             bool success = _context.SaveChanges() > 0;
@@ -111,21 +97,25 @@ namespace TranslationManagement.Api.Controllers
         public string UpdateJobStatus(int jobId, int translatorId, string newStatus = "")
         {
             _logger.LogInformation("Job status update request received: " + newStatus + " for job " + jobId.ToString() + " by translator " + translatorId);
-            if (typeof(JobStatuses).GetProperties().Count(prop => prop.Name == newStatus) == 0)
+
+            var newJobStatus = newStatus.ToEnum<TranslationJobStatus>();
+
+            if(newJobStatus == TranslationJobStatus.Invalid)
             {
-                return "invalid status";
+                //log
+                throw new ArgumentException("Invalid status");
             }
 
             var job = _context.TranslationJobs.Single(j => j.Id == jobId);
 
-            bool isInvalidStatusChange = (job.Status == JobStatuses.New && newStatus == JobStatuses.Completed) ||
-                                         job.Status == JobStatuses.Completed || newStatus == JobStatuses.New;
+            bool isInvalidStatusChange = (job.Status == TranslationJobStatus.New && newJobStatus == TranslationJobStatus.Completed) ||
+                                         job.Status == TranslationJobStatus.Completed || newJobStatus == TranslationJobStatus.New;
             if (isInvalidStatusChange)
             {
                 return "invalid status change";
             }
 
-            job.Status = newStatus;
+            job.Status = newJobStatus;
             _context.SaveChanges();
             return "updated";
         }

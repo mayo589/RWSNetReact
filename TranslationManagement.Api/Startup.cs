@@ -4,6 +4,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.OpenApi.Models;
 using Microsoft.EntityFrameworkCore;
+using TranslationManagement.Api.Repositories;
+using Newtonsoft.Json;
+using System.Text.Json.Serialization;
 
 namespace TranslationManagement.Api
 {
@@ -18,14 +21,25 @@ namespace TranslationManagement.Api
 
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddControllers();
+            services.AddControllers().AddNewtonsoftJson(options =>
+                options.SerializerSettings.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore
+            );
+
             services.AddSwaggerGen(c =>
             {
                 c.SwaggerDoc("v1", new OpenApiInfo { Title = "TranslationManagement.Api", Version = "v1" });
+                c.EnableAnnotations();
             });
 
-            services.AddDbContext<AppDbContext>(options => 
-                options.UseSqlite("Data Source=TranslationAppDatabase.db"));
+            services.AddDbContext<AppDbContext>(options =>
+            {
+                options.UseSqlite("Data Source=TranslationAppDatabase.db");
+                options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
+            });
+
+            services.AddScoped<TranslatorRepository>();
+            services.AddScoped<TranslationJobRepository>();
+            
         }
 
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
@@ -34,6 +48,11 @@ namespace TranslationManagement.Api
             app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "TranslationManagement.Api v1"));
 
             app.UseRouting();
+            app.UseCors(x => x
+                .AllowAnyMethod()
+                .AllowAnyHeader()
+                .SetIsOriginAllowed(origin => true));
+
             app.UseAuthorization();
             app.UseEndpoints(endpoints =>
             {

@@ -1,4 +1,7 @@
-﻿namespace TranslationManagement.Api.Enums
+﻿using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+
+namespace TranslationManagement.Api.Enums
 {
     public enum TranslatorStatus
     {

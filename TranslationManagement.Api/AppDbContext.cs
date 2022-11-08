@@ -24,6 +24,11 @@ namespace TranslationManagement.Api
              .Property(j => j.Status)
              .HasDefaultValue(TranslationJobStatus.New)
              .HasConversion<string>();
+
+            modelBuilder.Entity<Translator>()
+            .HasMany<TranslationJob>(t => t.TranslationJobs)
+            .WithOne(j => j.Translator)
+            .HasForeignKey(s => s.TranslatorId);
         }
     }
 }

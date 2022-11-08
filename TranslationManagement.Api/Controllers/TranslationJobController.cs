@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Linq;
 using External.ThirdParty.Services;
@@ -12,56 +14,64 @@ using TranslationManagement.Api.Controlers;
 using TranslationManagement.Api.Enums;
 using TranslationManagement.Api.Extensions;
 using TranslationManagement.Api.Models;
+using TranslationManagement.Api.Repositories;
 
 namespace TranslationManagement.Api.Controllers
 {
     [ApiController]
-    [Route("api/jobs/[action]")]
+    [Route("api/[controller]")]
     public class TranslationJobController : ControllerBase
     {
-        private AppDbContext _context;
-        private readonly ILogger<TranslatorManagementController> _logger;
+        private readonly ILogger<TranslatorController> logger;
+        private readonly TranslationJobRepository translationJobRepository;
+        private readonly TranslatorRepository translatorRepository;
+        private const double pricePerCharacter = 0.01;
 
-        public TranslationJobController(IServiceScopeFactory scopeFactory, ILogger<TranslatorManagementController> logger)
+        public TranslationJobController(ILogger<TranslatorController> logger, TranslationJobRepository translationJobRepository, TranslatorRepository translatorRepository)
         {
-            _context = scopeFactory.CreateScope().ServiceProvider.GetService<AppDbContext>();
-            _logger = logger;
+            this.logger = logger;
+            this.translationJobRepository = translationJobRepository;
+            this.translatorRepository = translatorRepository;
         }
 
+        // GET: api/TranslationJob
         [HttpGet]
-        public TranslationJob[] GetJobs()
+        public IEnumerable<TranslationJob> Get()
         {
-            return _context.TranslationJobs.ToArray();
+            return translationJobRepository.FindAll();
         }
 
-        const double PricePerCharacter = 0.01;
-        private void SetPrice(TranslationJob job)
+        // GET: api/TranslationJob/id
+        [HttpGet("{id:int}")]
+        public TranslationJob GetById(int id)
         {
-            job.Price = job.OriginalContent.Length * PricePerCharacter;
+            return translationJobRepository.FindById(id);
         }
 
+        // POST: api/TranslationJob
         [HttpPost]
-        public bool CreateJob(TranslationJob job)
+        public async Task<IActionResult> Add(TranslationJob job)
         {
             job.Status = TranslationJobStatus.New;
-            SetPrice(job);
-            _context.TranslationJobs.Add(job);
-            bool success = _context.SaveChanges() > 0;
-            if (success)
-            {
-                var notificationSvc = new UnreliableNotificationService();
-                while (!notificationSvc.SendNotification("Job created: " + job.Id).Result)
-                {
-                }
+            job.Price = GetJobPrice(job);
+            translationJobRepository.Create(job);
 
-                _logger.LogInformation("New job notification sent");
+            await translationJobRepository.SaveChangesAsync();
+
+            var notificationSvc = new UnreliableNotificationService();
+            while (!notificationSvc.SendNotification("Job created: " + job.Id).Result)
+            {
+                //TODO
             }
 
-            return success;
+            logger.LogInformation("New job notification sent");
+
+            return Ok();
         }
 
-        [HttpPost]
-        public bool CreateJobWithFile(IFormFile file, string customer)
+        // POST: api/TranslationJob/AddWithFile
+        [HttpPost("AddWithFile")]
+        public async Task<ActionResult> AddWithFile(IFormFile file, string customer)
         {
             var reader = new StreamReader(file.OpenReadStream());
             string content;
@@ -78,46 +88,132 @@ namespace TranslationManagement.Api.Controllers
             }
             else
             {
-                throw new NotSupportedException("unsupported file");
+                string err = $"Unsupported file: {file.FileName}";
+                logger.LogError(err);
+                return StatusCode(StatusCodes.Status500InternalServerError, err);
             }
 
-            var newJob = new TranslationJob()
+            var job = new TranslationJob()
             {
                 OriginalContent = content,
                 TranslatedContent = "",
                 CustomerName = customer,
+                Status = TranslationJobStatus.New,
             };
+            job.Price = GetJobPrice(job);
 
-            SetPrice(newJob);
+            translationJobRepository.Create(job);
+            await translationJobRepository.SaveChangesAsync();
 
-            return CreateJob(newJob);
+            return Ok();
         }
 
-        [HttpPost]
-        public string UpdateJobStatus(int jobId, int translatorId, string newStatus = "")
+        // POST: api/TranslationJob/AssignTranslator
+        [HttpPost("AssignTranslator")]
+        public async Task<ActionResult> AssignTranslator(int id, int translatorId)
         {
-            _logger.LogInformation("Job status update request received: " + newStatus + " for job " + jobId.ToString() + " by translator " + translatorId);
+            logger.LogInformation($"Job assign request received for job id: {id} by translator id: {translatorId}");
 
-            var newJobStatus = newStatus.ToEnum<TranslationJobStatus>();
-
-            if(newJobStatus == TranslationJobStatus.Invalid)
+            var job = translationJobRepository.FindById(id);
+            if (job == null)
             {
-                //log
-                throw new ArgumentException("Invalid status");
+                string err = $"Invalid job id {id} in AssignTranslator request";
+                logger.LogError(err);
+                return StatusCode(StatusCodes.Status500InternalServerError, err);
             }
 
-            var job = _context.TranslationJobs.Single(j => j.Id == jobId);
-
-            bool isInvalidStatusChange = (job.Status == TranslationJobStatus.New && newJobStatus == TranslationJobStatus.Completed) ||
-                                         job.Status == TranslationJobStatus.Completed || newJobStatus == TranslationJobStatus.New;
-            if (isInvalidStatusChange)
+            var translator = translatorRepository.FindById(id);
+            if (translator == null)
             {
-                return "invalid status change";
+                string err = $"Invalid translator id {id} in AssignTranslator request";
+                logger.LogError(err);
+                return StatusCode(StatusCodes.Status500InternalServerError, err);
+            }
+
+            job.Translator = translator;
+            translationJobRepository.Update(job);
+            await translationJobRepository.SaveChangesAsync();
+
+            return Ok();
+        }
+
+        // POST: api/TranslationJob/UpdateStatus
+        [HttpPost("UpdateStatus")]
+        public async Task<ActionResult> UpdateStatus(int id, string newStatus)
+        {
+            logger.LogInformation($"Job status update request received: {newStatus} for job id: {id}");
+
+            var newJobStatus = newStatus.ToEnum<TranslationJobStatus>();
+            if(newJobStatus == TranslationJobStatus.Invalid)
+            {
+                string err = $"Job status update received invalid new status: {newStatus} for job id: {id}";
+                logger.LogError(err);
+                return StatusCode(StatusCodes.Status500InternalServerError, err);
+            }
+
+            var job = translationJobRepository.FindById(id);
+            if (job == null)
+            {
+                string err = $"Invalid job id {id} in status update request";
+                logger.LogError(err);
+                return StatusCode(StatusCodes.Status500InternalServerError, err);
+            }
+
+            var originalJobStatus = job.Status;
+            bool isValidStatusChange = (originalJobStatus == TranslationJobStatus.New && newJobStatus == TranslationJobStatus.InProgress) ||
+                                        (originalJobStatus == TranslationJobStatus.InProgress && newJobStatus == TranslationJobStatus.Completed); 
+
+            if (isValidStatusChange)
+            {
+                string err = $"Invalid status update for job id: {id}. Original status: {originalJobStatus}, new status: {newJobStatus}";
+                logger.LogError(err);
+                return StatusCode(StatusCodes.Status500InternalServerError, err);
             }
 
             job.Status = newJobStatus;
-            _context.SaveChanges();
-            return "updated";
+            translationJobRepository.Update(job);
+            await translationJobRepository.SaveChangesAsync();
+
+            return Ok();
+        }
+
+        // PUT: api/TranslationJob/id
+        [HttpPut("{id}")]
+        public async Task<ActionResult> PutById(int id, TranslationJob translationJob)
+        {
+            if (id != translationJob.Id)
+                return BadRequest("TranslationJob ID mismatch");
+
+            if (translationJob is null)
+                return NotFound();
+
+            var jobToUpdate = translationJobRepository.FindById(id);
+            if (jobToUpdate == null)
+                return NotFound($"TranslationJob with Id = {id} not found");
+
+            translationJobRepository.Update(translationJob);
+            await translationJobRepository.SaveChangesAsync();
+
+            return Ok();
+        }
+
+        // DELETE: api/TranslationJob/id
+        [HttpDelete("{id}")]
+        public async Task<ActionResult> DeleteById(int id)
+        {
+            if (translationJobRepository.FindById(id) is TranslationJob translationJob)
+            {
+                translationJobRepository.Delete(translationJob);
+                await translationJobRepository.SaveChangesAsync();
+                return Ok(translationJob);
+            }
+
+            return NotFound();
+        }
+
+        private double GetJobPrice(TranslationJob job)
+        {
+            return job.OriginalContent.Length * pricePerCharacter;
         }
     }
 }

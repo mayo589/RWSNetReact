@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using TranslationManagement.Api.Repositories;
 using Newtonsoft.Json;
 using System.Text.Json.Serialization;
+using External.ThirdParty.Services;
 
 namespace TranslationManagement.Api
 {
@@ -31,15 +32,11 @@ namespace TranslationManagement.Api
                 c.EnableAnnotations();
             });
 
-            services.AddDbContext<AppDbContext>(options =>
-            {
-                options.UseSqlite("Data Source=TranslationAppDatabase.db");
-                options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
-            });
+            services.AddDbContext<AppDbContext>();
 
             services.AddScoped<TranslatorRepository>();
             services.AddScoped<TranslationJobRepository>();
-            
+            services.AddScoped<UnreliableNotificationService>();
         }
 
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)

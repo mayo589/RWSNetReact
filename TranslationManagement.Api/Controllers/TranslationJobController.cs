@@ -25,13 +25,19 @@ namespace TranslationManagement.Api.Controllers
         private readonly ILogger<TranslatorController> logger;
         private readonly TranslationJobRepository translationJobRepository;
         private readonly TranslatorRepository translatorRepository;
+        private readonly UnreliableNotificationService notificationService;
         private const double pricePerCharacter = 0.01;
 
-        public TranslationJobController(ILogger<TranslatorController> logger, TranslationJobRepository translationJobRepository, TranslatorRepository translatorRepository)
+        public TranslationJobController(
+            ILogger<TranslatorController> logger, 
+            TranslationJobRepository translationJobRepository, 
+            TranslatorRepository translatorRepository,
+            UnreliableNotificationService notificationService)
         {
             this.logger = logger;
             this.translationJobRepository = translationJobRepository;
             this.translatorRepository = translatorRepository;
+            this.notificationService = notificationService;
         }
 
         // GET: api/TranslationJob
@@ -57,12 +63,7 @@ namespace TranslationManagement.Api.Controllers
             translationJobRepository.Create(job);
 
             await translationJobRepository.SaveChangesAsync();
-
-            var notificationSvc = new UnreliableNotificationService();
-            while (!notificationSvc.SendNotification("Job created: " + job.Id).Result)
-            {
-                //TODO
-            }
+            await TrySendNotification(job);
 
             logger.LogInformation("New job notification sent");
 
@@ -122,10 +123,10 @@ namespace TranslationManagement.Api.Controllers
                 return StatusCode(StatusCodes.Status500InternalServerError, err);
             }
 
-            var translator = translatorRepository.FindById(id);
+            var translator = translatorRepository.FindById(translatorId);
             if (translator == null)
             {
-                string err = $"Invalid translator id {id} in AssignTranslator request";
+                string err = $"Invalid translator id {translatorId} in AssignTranslator request";
                 logger.LogError(err);
                 return StatusCode(StatusCodes.Status500InternalServerError, err);
             }
@@ -144,7 +145,7 @@ namespace TranslationManagement.Api.Controllers
             logger.LogInformation($"Job status update request received: {newStatus} for job id: {id}");
 
             var newJobStatus = newStatus.ToEnum<TranslationJobStatus>();
-            if(newJobStatus == TranslationJobStatus.Invalid)
+            if (newJobStatus == TranslationJobStatus.Invalid)
             {
                 string err = $"Job status update received invalid new status: {newStatus} for job id: {id}";
                 logger.LogError(err);
@@ -161,9 +162,9 @@ namespace TranslationManagement.Api.Controllers
 
             var originalJobStatus = job.Status;
             bool isValidStatusChange = (originalJobStatus == TranslationJobStatus.New && newJobStatus == TranslationJobStatus.InProgress) ||
-                                        (originalJobStatus == TranslationJobStatus.InProgress && newJobStatus == TranslationJobStatus.Completed); 
+                                        (originalJobStatus == TranslationJobStatus.InProgress && newJobStatus == TranslationJobStatus.Completed);
 
-            if (isValidStatusChange)
+            if (!isValidStatusChange)
             {
                 string err = $"Invalid status update for job id: {id}. Original status: {originalJobStatus}, new status: {newJobStatus}";
                 logger.LogError(err);
@@ -214,6 +215,32 @@ namespace TranslationManagement.Api.Controllers
         private double GetJobPrice(TranslationJob job)
         {
             return job.OriginalContent.Length * pricePerCharacter;
+        }
+
+        private async Task TrySendNotification(TranslationJob job)
+        {
+            try
+            {
+                var success = false;
+                var maxCount = 10;
+                var currentCount = 0;
+
+                do
+                {
+                    currentCount++;
+                    success = await notificationService.SendNotification("Job created: " + job.Id);
+                }
+                while (currentCount < maxCount && !success);
+
+                if (!success)
+                {
+                    logger.LogError($"Could not send notification after 10 tries for job id: {job.Id}");
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError($"Error while sending notification: {ex.Message}", ex);
+            }
         }
     }
 }

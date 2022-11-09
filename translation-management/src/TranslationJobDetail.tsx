@@ -1,7 +1,22 @@
-import { Box, Grid, Typography, TextField, MenuItem, Button } from '@mui/material';
+import { Box, Grid, Typography, TextField, MenuItem, Button, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, } from '@mui/material';
 import React, { useContext } from 'react';
 import { useParams } from 'react-router-dom';
 import { AppContext } from './App';
+
+const jobStatuses = [
+    {
+        value: 1,
+        label: 'New',
+    },
+    {
+        value: 2,
+        label: 'InProgress',
+    },
+    {
+        value: 3,
+        label: 'Completed',
+    },
+];
 
 const TranslationJobDetail = () => {
     const appContext = useContext(AppContext);
@@ -11,6 +26,8 @@ const TranslationJobDetail = () => {
     const [jobOriginalContent, setJobOriginalContent] = React.useState('');
     const [jobPrice, setJobPrice] = React.useState(0);
     const [jobStatus, setJobStatus] = React.useState('');
+    const [dialogOpen, setDialogOpen] = React.useState(false);
+    const [jobStatusChange, setJobStatusChange] = React.useState('');
 
     React.useEffect(() => {
         async function fetchJob() {
@@ -53,6 +70,27 @@ const TranslationJobDetail = () => {
         fetchAdd();
     }
 
+    const handleAssign = () => {
+        async function fetchUpdateStatus() {
+            const requestOptions = {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: id,
+                })
+            };
+            fetch(`${appContext.apiUrl}/TranslationJob/UpdateStatus/?id=${id}&newStatus=${jobStatusChange}`, requestOptions)
+                .then(res => {
+                    window.location.reload();
+                })
+        }
+        fetchUpdateStatus();
+    };
+
+    const handleClose = () => {
+        setDialogOpen(false);
+    };
+
     return (
         <Box sx={{ width: '95%' }}>
             <Typography variant="h2" gutterBottom>
@@ -66,7 +104,28 @@ const TranslationJobDetail = () => {
 
             <Box sx={{ mx: 0, my: 2 }} >
                 <Button variant="contained" onClick={handleClickSave}>Save</Button>
+                <Button variant="contained" onClick={() => setDialogOpen(true)}>Change Status</Button>
             </Box>
+
+            <Dialog open={dialogOpen} onClose={handleClose}>
+                <DialogTitle>Job status</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        Change job status
+                    </DialogContentText>
+                    <TextField value={jobStatusChange} onChange={(ev) => setJobStatusChange(ev.target.value)} select margin="dense" label="Status" fullWidth>
+                        {jobStatuses.map((option: any) => (
+                            <MenuItem key={option.label} value={option.label}>
+                                {option.label}
+                            </MenuItem>
+                        ))}
+                    </TextField>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={handleClose}>Cancel</Button>
+                    <Button onClick={handleAssign} variant="contained">Assign</Button>
+                </DialogActions>
+            </Dialog>
         </Box>
     );
 }
